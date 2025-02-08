@@ -1,21 +1,30 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 def get_Globals():
-    global NMOL, NEL, NPOL
-    NMOL = 10
+    global NMOL, NEL, NPOL, INIT_BASIS, INIT_STATE
+    NMOL = 2 # Number of molecules
     NEL  = 2
     NPOL = 1 + NMOL*(NEL-1) + 1
+    INIT_BASIS = "POL" # "adFock", "POL"
+    INIT_STATE = 1
 
     global TIME, NSTEPS, dtN, MASS
-    NSTEPS = 2500
+    NSTEPS = 10000
     dtN    = 1
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
     global A0, wc
-    A0 = 0.02
-    wc = 0.08
+    A0 = 0.03
+    wc = 0.09
+
+    global DATA_DIR
+    DATA_DIR = "PLOTS_DATA/"
+    try: os.mkdir(DATA_DIR)
+    except FileExistsError: pass
+
 
 def interpolate_Hel():
 
@@ -104,53 +113,53 @@ def interpolate_Hel():
     plt.plot( R_FINE, E_interp(R_FINE)[:,0] - np.min(E_LIST[:,0]), label='S0 (interpolated)' )
     plt.plot( R_FINE, E_interp(R_FINE)[:,1] - np.min(E_LIST[:,0]), label='S1 (interpolated)' )
     plt.legend()
-    plt.savefig( "E.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/E_Hel.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
-    # plt.plot( R_LIST, DIPOLE[:,0,0], "o", label='00 (exact)' )
-    # plt.plot( R_LIST, DIPOLE[:,0,1], "o", label='01 (exact)' )
-    # plt.plot( R_LIST, DIPOLE[:,1,0], "o", label='10 (exact)' )
-    # plt.plot( R_LIST, DIPOLE[:,1,1], "o", label='11 (exact)' )
-    # plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,0,0], label='00 (interpolated)' )
-    # plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,0,1], label='01 (interpolated)' )
-    # plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,1,0], label='10 (interpolated)' )
-    # plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,1,1], label='11 (interpolated)' )
-    # plt.legend()
-    # plt.savefig( "DIPOLE.jpg", dpi=300 )
-    # plt.clf()
-    # plt.close()
+    plt.plot( R_LIST, DIPOLE[:,0,0], "o", label='00 (exact)' )
+    plt.plot( R_LIST, DIPOLE[:,0,1], "o", label='01 (exact)' )
+    plt.plot( R_LIST, DIPOLE[:,1,0], "o", label='10 (exact)' )
+    plt.plot( R_LIST, DIPOLE[:,1,1], "o", label='11 (exact)' )
+    plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,0,0], label='00 (interpolated)' )
+    plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,0,1], label='01 (interpolated)' )
+    plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,1,0], label='10 (interpolated)' )
+    plt.plot( R_FINE, DIPOLE_interp(R_FINE)[:,1,1], label='11 (interpolated)' )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/DIPOLE_Hel.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
 
-    # plt.plot( R_LIST, GRAD_E[:,0], "o", label='S0 (exact)' )
-    # plt.plot( R_LIST, GRAD_E[:,1], "o", label='S1 (exact)' )
-    # plt.plot( R_FINE, GRAD_E_interp(R_FINE)[:,0], label='S0 (interpolated)' )
-    # plt.plot( R_FINE, GRAD_E_interp(R_FINE)[:,1], label='S1 (interpolated)' )
-    # plt.legend()
-    # plt.savefig( "GRAD_E.jpg", dpi=300 )
-    # plt.clf()
-    # plt.close()
+    plt.plot( R_LIST, GRAD_E[:,0], "o", label='S0 (exact)' )
+    plt.plot( R_LIST, GRAD_E[:,1], "o", label='S1 (exact)' )
+    plt.plot( R_FINE, GRAD_E_interp(R_FINE)[:,0], label='S0 (interpolated)' )
+    plt.plot( R_FINE, GRAD_E_interp(R_FINE)[:,1], label='S1 (interpolated)' )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/GRAD_E_Hel.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
 
-    # plt.plot( R_LIST, NACR[:,0,1], "o", label='S0-S1 (exact)' )
-    # plt.plot( R_LIST, NACR[:,1,0], "o", label='S1-S0 (exact)' )
-    # plt.plot( R_FINE, NACR_interp(R_FINE)[:,0,1], label='S0-S1 (interpolated)' )
-    # plt.plot( R_FINE, NACR_interp(R_FINE)[:,1,0], label='S1-S0 (interpolated)' )
-    # plt.legend()
-    # plt.savefig( "NACR.jpg", dpi=300 )
-    # plt.clf()
-    # plt.close()
+    plt.plot( R_LIST, NACR[:,0,1], "o", label='S0-S1 (exact)' )
+    plt.plot( R_LIST, NACR[:,1,0], "o", label='S1-S0 (exact)' )
+    plt.plot( R_FINE, NACR_interp(R_FINE)[:,0,1], label='S0-S1 (interpolated)' )
+    plt.plot( R_FINE, NACR_interp(R_FINE)[:,1,0], label='S1-S0 (interpolated)' )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/NACR_Hel.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
 
-    # plt.plot( R_LIST, GRAD_DIPOLE[:,0,0], "o", label='00 (exact)' )
-    # plt.plot( R_LIST, GRAD_DIPOLE[:,0,1], "o", label='01 (exact)' )
-    # plt.plot( R_LIST, GRAD_DIPOLE[:,1,0], "o", label='10 (exact)' )
-    # plt.plot( R_LIST, GRAD_DIPOLE[:,1,1], "o", label='11 (exact)' )
-    # plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,0,0], label='00 (interpolated)' )
-    # plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,0,1], label='01 (interpolated)' )
-    # plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,1,0], label='10 (interpolated)' )
-    # plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,1,1], label='11 (interpolated)' )
-    # plt.legend()
-    # plt.savefig( "GRAD_DIPOLE.jpg", dpi=300 )
-    # plt.clf()
-    # plt.close()
+    plt.plot( R_LIST, GRAD_DIPOLE[:,0,0], "o", label='00 (exact)' )
+    plt.plot( R_LIST, GRAD_DIPOLE[:,0,1], "o", label='01 (exact)' )
+    plt.plot( R_LIST, GRAD_DIPOLE[:,1,0], "o", label='10 (exact)' )
+    plt.plot( R_LIST, GRAD_DIPOLE[:,1,1], "o", label='11 (exact)' )
+    plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,0,0], label='00 (interpolated)' )
+    plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,0,1], label='01 (interpolated)' )
+    plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,1,0], label='10 (interpolated)' )
+    plt.plot( R_FINE, GRAD_DIPOLE_interp(R_FINE)[:,1,1], label='11 (interpolated)' )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/GRAD_DIPOLE_Hel.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
 
     # Make dictionary to store all data
     MOL_DATA = {}
@@ -199,8 +208,8 @@ def get_TC_Force( R, Z, U_TC, MOL_DATA ):
         F[A,0,1+A]   = -NACR[A,0,1] * ( E[A,1] - E[A,0] )
         F[A,1+A,0]   = F[A,0,1+A]
     
-    F = np.einsum("xj,Rxy,yk->Rjk", U_TC, F, U_TC, optimize=True)
-    F = np.einsum("Rjk,jk->R", F.real, RHO, optimize=True)
+    F = np.einsum("aJ,Rab,bK->RJK", U_TC, F, U_TC, optimize=True)
+    F = np.einsum("RJK,JK->R", F, RHO.real, optimize=True)
     return F
 
 def get_S_el( R1, R0, MOL_DATA ):
@@ -221,7 +230,7 @@ def get_S_el( R1, R0, MOL_DATA ):
 
     return S_el
 
-def do_Ehrenfest( R0, V0, Z0_POL, MOL_DATA ):
+def do_Ehrenfest( R0, V0, Z0_TMP, MOL_DATA ):
 
     def correct_phase( Unew, Uold=None ):
         PHASE = np.einsum("xj,xj->j", Unew, Uold)
@@ -238,11 +247,17 @@ def do_Ehrenfest( R0, V0, Z0_POL, MOL_DATA ):
 
     Rt[0,:] = R0
     Vt[0,:] = V0
-    Zt_pol[0,:] = Z0_POL
 
     # Do first polaritonic structure calculation
     H_TC_0, E_TC_0, U_TC_0 = H_TC( Rt[0,:], MOL_DATA )
-    Zt_adF[0,:] = U_TC_0.T @ Zt_pol[0,:]
+
+    if ( INIT_BASIS == "POL" ):
+        Zt_pol[0,:] = Z0_TMP
+        Zt_adF[0,:] = np.einsum("FP,P->F", U_TC_0, Zt_pol[0,:]) # POL to adFock
+    elif ( INIT_BASIS == "adFock" ):
+        Zt_adF[0,:] = Z0_TMP
+        Zt_pol[0,:] = np.einsum("FP,F->P", U_TC_0, Zt_adF[0,:]) # adFock to POL
+
     F0 = get_TC_Force( Rt[0,:], Zt_pol[0,:], U_TC_0, MOL_DATA )
 
     Et[0,0] = np.sum( E_TC_0 * np.abs(Zt_pol[0,:])**2 ) # Potential Energy
@@ -250,20 +265,22 @@ def do_Ehrenfest( R0, V0, Z0_POL, MOL_DATA ):
     Et[0,2] = Et[0,0] + Et[0,1]
 
     for step in range( 1, NSTEPS ):
-        print( "Step %d of %d" % (step, NSTEPS) )
+        if ( step == 2 or step % 100 == 0 ):
+            print( "Step %d of %d" % (step, NSTEPS) )
+            print( F0 )
 
         Rt[step,:]             = Rt[step-1,:] + dtN * Vt[step-1,:] + 0.5 * dtN**2 * F0 / MASS
         H_TC_1, E_TC_1, U_TC_1 = H_TC( Rt[step,:], MOL_DATA )
         U_TC_1                 = correct_phase( U_TC_1, Uold=U_TC_0 )
 
         S_POL          = np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
-        S_el           = get_S_el( Rt[step,:], Rt[step-1,:], MOL_DATA )
-        S_el           = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0)
+        S_el           = get_S_el( Rt[step,:], Rt[step-1,:], MOL_DATA ) # <t1|t0>
+        S_el           = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0> # (U_TC_1, S_el, U_TC_0) ???
 
         Zt_pol[step,:] = np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
         Zt_pol[step,:] = np.einsum("jk,k->j", S_el, Zt_pol[step,:])
         Zt_pol[step,:] = np.exp(-1j * E_TC_1 * dtN) * Zt_pol[step,:]
-        Zt_adF[step,:] = np.einsum("xj,j->x", U_TC_1, Zt_pol[step,:])
+        Zt_adF[step,:] = np.einsum("FP,P->F", U_TC_1, Zt_pol[step,:]) # POL to adFock
 
         F1         = get_TC_Force( Rt[step,:], Zt_pol[step,:], U_TC_1, MOL_DATA )
         Vt[step,:] = Vt[step-1,:] + 0.5 * dtN * (F0 + F1) / MASS
@@ -277,6 +294,7 @@ def do_Ehrenfest( R0, V0, Z0_POL, MOL_DATA ):
         E_TC_0 = E_TC_1
         H_TC_0 = H_TC_1
 
+
     return Rt, Vt, Zt_pol, Zt_adF, Et
 
 def plot_POL_PES( MOL_DATA ):
@@ -289,11 +307,14 @@ def plot_POL_PES( MOL_DATA ):
         _, E_TC[Ri,:], _ = H_TC( R_TMP, MOL_DATA )
     
     for state in range( NPOL ):
-        plt.plot( R_LIST, E_TC[:,state], "-", label='P%d' % state )
+        if ( state % 2 == 0 ):
+            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "-", label='P%d' % state )
+        else:
+            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "--", label='P%d' % state )
     plt.xlabel( "R", fontsize=15 )
     plt.ylabel( "Energy (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( "E_TC.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/E_TC.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
@@ -302,42 +323,50 @@ if ( __name__ == "__main__" ):
     MOL_DATA = interpolate_Hel()
     plot_POL_PES( MOL_DATA )
 
-    R0 = np.array([-4]*NMOL)
-    V0 = np.zeros(NMOL)
-    Z0 = np.zeros(NPOL); Z0[1] = 1.0 # POL BASIS
+    R0             = np.array([-4]*NMOL)
+    V0             = np.zeros(NMOL)
+    Z0             = np.zeros(NPOL)
+    Z0[INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
     Rt, Vt, Zt_pol, Zt_adF, Et = do_Ehrenfest( R0, V0, Z0, MOL_DATA)
 
     # Plot Rt
     for mol in range( NMOL ):
-        plt.plot( TIME, Rt[:,mol], "-", label="Molecule %d" % mol )
+        plt.plot( TIME, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label="Molecule %d" % mol )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Position (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( "R.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/R.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
-    # Plot Rt
+    # Plot Polaritonic Population
     POP = np.abs(Zt_pol)**2
-    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6, label="TOTAL" )
+    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
     for state in range( NPOL ):
-        plt.plot( TIME, POP[:,state], "-", label="State %d" % state )
+        plt.plot( TIME, POP[:,state], "-", label="P%d" % state )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( "POP_POL.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/POP_POL.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
-    # Plot POP_adF
+    # Plot adiabatic-Fock population
     POP = np.abs(Zt_adF)**2
-    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6, label="TOTAL" )
-    for state in range( NPOL ):
-        plt.plot( TIME, POP[:,state], "-", label="State %d" % state )
+    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
+    # plt.plot( TIME, POP[:,0], "-", c="black", label="$\\mathrm{GS}$" )
+    # for mol in range( 1, NPOL-1 ):
+    #     #plt.plot( TIME, POP[:,state], "-", label="MOL %d" % (mol-1) * (mol < 5) )
+    #     plt.plot( TIME, POP[:,state], "-", label="MOL %d" % (mol-1) )
+    # plt.plot( TIME, POP[:,-1], "--", c="orange", label="$\\mathrm{CAV}$" )
+    plt.plot( TIME, POP[:,0], "-", label="State %d" % (0) )
+    plt.plot( TIME, POP[:,1], "-", label="State %d" % (1) )
+    plt.plot( TIME, POP[:,2], "-", label="State %d" % (2) )
+    plt.plot( TIME, POP[:,3], "-", label="State %d" % (3) )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( "POP_adF.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/POP_adF.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
@@ -348,6 +377,15 @@ if ( __name__ == "__main__" ):
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( "Et.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/Et.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot the average photonic character
+    ada = Zt_adF[:,-1]**2
+    plt.plot( TIME, np.abs(ada), "-" )
+    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.ylabel( "Photonic Character, $\\langle \\hat{a}^\\dagger \\hat{a} \\rangle$", fontsize=15 )
+    plt.savefig( f"{DATA_DIR}/PHOTONIC.jpg", dpi=300 )
     plt.clf()
     plt.close()
