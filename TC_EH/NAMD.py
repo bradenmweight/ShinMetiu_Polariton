@@ -1,30 +1,48 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from numba import njit
+from time import time
 
 def get_Globals():
     global NMOL, NEL, NPOL, INIT_BASIS, INIT_STATE
-    NMOL = 2 # Number of molecules
+    NMOL = 25 # Number of molecules
     NEL  = 2
     NPOL = 1 + NMOL*(NEL-1) + 1
     INIT_BASIS = "POL" # "adFock", "POL"
-    INIT_STATE = 1
+    INIT_STATE = 0
 
     global TIME, NSTEPS, dtN, MASS
-    NSTEPS = 10000
-    dtN    = 1
+    NSTEPS = 1000
+    dtN    = 10
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
-    global A0, wc
-    A0 = 0.03
-    wc = 0.09
+    global A0, WC
+    A0 = 0.00
+    WC = 0.09
+
+    # Langevin Part (Trapazoid Propagation)
+    global L_COEFF, kT, a, b
+    L_COEFF         = 0.1 # 0.001
+    kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
+    beta            = L_COEFF / 1 # Langevin Coefficient / Mass
+    a               = (1 - beta * dtN / 2) / (1 + beta * dtN / 2)
+    b               =  1                   / (1 + beta * dtN / 2)
+
+
+    # Get memory size in GB of NMOL,NPOL,NPOL ndarray
+    global MEMORY_SIZE
+    MEMORY_SIZE = NMOL * NPOL * NPOL * 8 / 1024**3
+    print( "Memory size of Force matrix (GB): %1.3f GB" % MEMORY_SIZE )
+    if ( MEMORY_SIZE > 2 ):
+        print( "Force matrix is too big for head node, reduce NMOL." )
+        #exit()
 
     global DATA_DIR
     DATA_DIR = "PLOTS_DATA/"
     try: os.mkdir(DATA_DIR)
     except FileExistsError: pass
-
 
 def interpolate_Hel():
 
@@ -60,7 +78,7 @@ def interpolate_Hel():
                 T[rj,rk] = (-1)**(rj-rk) * 2 / (rj-rk)**2
     T /= 2 * dr**2
 
-    R_LIST      = np.arange( -6,6+0.1,0.1 )
+    R_LIST      = np.arange( -8,8+0.1,0.1 )
     E_LIST      = np.zeros( (len(R_LIST), NEL) )
     U_LIST      = np.zeros( (len(R_LIST), Nr,NEL) )
     DIPOLE      = np.zeros( (len(R_LIST), NEL,NEL) )
@@ -171,7 +189,7 @@ def interpolate_Hel():
     MOL_DATA["GRAD_DIPOLE"] = GRAD_DIPOLE_interp
     return MOL_DATA
 
-def H_TC( R, MOL_DATA ):
+def get_H_TC( R, MOL_DATA ):
     E = MOL_DATA["ENERGY"](R) # (mol,el)
     D = MOL_DATA["DIPOLE"](R) # (mol,el,el)
 
@@ -181,15 +199,25 @@ def H_TC( R, MOL_DATA ):
 
     H_TC        = np.zeros( (1+NMOL+1,1+NMOL+1) )
     H_TC[0,0]   = np.sum( E[:,0] )
-    H_TC[-1,-1] = H_TC[0,0] + wc
+    H_TC[-1,-1] = H_TC[0,0] + WC
     for A in range( NMOL ):
         H_TC[1+A,1+A] = H_TC[0,0] - E[A,0] + E[A,1]
-        H_TC[1+A,-1]   = wc * A0 * D[A,0,1]
-        H_TC[-1,1+A]   = wc * A0 * D[A,0,1]
+        H_TC[1+A,-1]   = WC * A0 * D[A,0,1] / np.sqrt(NMOL)
+        H_TC[-1,1+A]   = WC * A0 * D[A,0,1] / np.sqrt(NMOL)
 
     E_TC, U_TC = np.linalg.eigh( H_TC )
     return H_TC, E_TC, U_TC
 
+def timer( func ):
+    def wrapper( *args, **kwargs ):
+        start  = time()
+        result = func( *args, **kwargs )
+        end    = time()
+        print( "Function %s took %1.4f s." % (func.__name__, end-start) )
+        return result
+    return wrapper
+
+# @timer
 def get_TC_Force( R, Z, U_TC, MOL_DATA ):
     RHO         = np.einsum( "j,k->jk", Z.conj(), Z )
     E           = MOL_DATA["ENERGY"](R) # (mol,el)
@@ -198,13 +226,13 @@ def get_TC_Force( R, Z, U_TC, MOL_DATA ):
     NACR        = MOL_DATA["NACR"](R) # (mol,el,el)
     F           = np.zeros( (NMOL, NPOL, NPOL) )
 
-    for A in range( NPOL ):
-        F[:,A,A]     = -GRAD_E[:,0]
+    for P in range( NPOL ):
+        F[:,P,P]     = -GRAD_E[:,0]
 
     for A in range( NMOL ):
         F[A,1+A,1+A] = -GRAD_E[A,1]
-        F[A,-1,1+A]  = -wc * A0 * GRAD_DIPOLE[A,0,1]
-        F[A,1+A,-1]  = -wc * A0 * GRAD_DIPOLE[A,1,0]
+        F[A,-1,1+A]  = -WC * A0 * GRAD_DIPOLE[A,0,1] / np.sqrt(NMOL)
+        F[A,1+A,-1]  = -WC * A0 * GRAD_DIPOLE[A,1,0] / np.sqrt(NMOL)
         F[A,0,1+A]   = -NACR[A,0,1] * ( E[A,1] - E[A,0] )
         F[A,1+A,0]   = F[A,0,1+A]
     
@@ -212,15 +240,16 @@ def get_TC_Force( R, Z, U_TC, MOL_DATA ):
     F = np.einsum("RJK,JK->R", F, RHO.real, optimize=True)
     return F
 
-def get_S_el( R1, R0, MOL_DATA ):
-    U1 = MOL_DATA["U"](R1) # (mol,x,el)
-    U0 = MOL_DATA["U"](R0) # (mol,x,el)
-    S  = np.einsum("Axj,Axk->Ajk", U1, U0)
+# @timer
+@njit()
+def get_S_el( U1, U0 ):
+    S = np.zeros( (NMOL, U0.shape[-1], U0.shape[-1]), dtype=np.complex128 )
     for A in range( NMOL ):
+        S[A,:,:] = U1[A,:,:].T @ U0[A,:,:] # S = np.einsum("Axj,Axk->Ajk", U1, U0)
         u,s,v = np.linalg.svd( S[A,:,:] )
         S[A,:,:] = u @ v
     
-    S_el      = np.zeros( (NPOL, NPOL) )
+    S_el      = np.zeros( (NPOL, NPOL), dtype=np.complex128 )
     S_el[0,0] = np.prod( S[:,0,0] )
     S_el[-1,-1] = 1.0
     for A in range( NMOL ):
@@ -230,14 +259,35 @@ def get_S_el( R1, R0, MOL_DATA ):
 
     return S_el
 
-def do_Ehrenfest( R0, V0, Z0_TMP, MOL_DATA ):
+def get_Temperature( EKIN ):
+    T  = 2 * EKIN / (3*NMOL)
+    T *= 27.2114 * 300 / 0.025
+    return T
 
-    def correct_phase( Unew, Uold=None ):
-        PHASE = np.einsum("xj,xj->j", Unew, Uold)
-        for n in range( NEL ):
-            f = np.cos( np.angle(PHASE[n]) )
-            Unew[:,n] = f * Unew[:,n] # phase correction
-        return Unew
+# @timer
+@njit()
+def correct_phase( Unew, Uold=None ):
+    PHASE = np.sum(Unew.T.conj() * Uold, axis=0) # np.einsum("xj,xj->j", Unew, Uold)
+    for n in range( NEL ):
+        f = np.cos( np.angle(PHASE[n]) )
+        Unew[:,n] = f * Unew[:,n] # phase correction
+    return Unew
+
+#@timer
+@njit()
+def do_electronic_propagation( step, E_TC_1, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_adF ):
+    S_POL          = U_TC_1.T @ U_TC_0 # np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
+    S_el           = get_S_el( U1, U0 ) # <t1|t0>
+    S_el[:,:]      = U_TC_0.T @ S_el @ U_TC_0 # S_el = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0>
+
+    Zt_pol[step,:] = S_POL @ Zt_pol[step-1,:] # np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
+    Zt_pol[step,:] = S_el  @ Zt_pol[step,:]   # np.einsum("jk,k->j", S_el, Zt_pol[step,:])
+    Zt_pol[step,:] = np.exp(-1j * E_TC_1 * dtN) * Zt_pol[step,:]
+    Zt_adF[step,:] = U_TC_1 @ Zt_pol[step,:] # np.einsum("FP,P->F", U_TC_1, Zt_pol[step,:]) # POL to adFock
+
+    return Zt_pol, Zt_adF
+
+def do_Ehrenfest( R0, V0, MOL_DATA ):
 
     Rt = np.zeros( (NSTEPS,NMOL) )
     Vt = np.zeros( (NSTEPS,NMOL) )
@@ -249,13 +299,13 @@ def do_Ehrenfest( R0, V0, Z0_TMP, MOL_DATA ):
     Vt[0,:] = V0
 
     # Do first polaritonic structure calculation
-    H_TC_0, E_TC_0, U_TC_0 = H_TC( Rt[0,:], MOL_DATA )
+    H_TC_0, E_TC_0, U_TC_0 = get_H_TC( Rt[0,:], MOL_DATA )
 
     if ( INIT_BASIS == "POL" ):
-        Zt_pol[0,:] = Z0_TMP
+        Zt_pol[0,INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
         Zt_adF[0,:] = np.einsum("FP,P->F", U_TC_0, Zt_pol[0,:]) # POL to adFock
     elif ( INIT_BASIS == "adFock" ):
-        Zt_adF[0,:] = Z0_TMP
+        Zt_adF[0,INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
         Zt_pol[0,:] = np.einsum("FP,F->P", U_TC_0, Zt_adF[0,:]) # adFock to POL
 
     F0 = get_TC_Force( Rt[0,:], Zt_pol[0,:], U_TC_0, MOL_DATA )
@@ -267,27 +317,20 @@ def do_Ehrenfest( R0, V0, Z0_TMP, MOL_DATA ):
     for step in range( 1, NSTEPS ):
         if ( step == 2 or step % 100 == 0 ):
             print( "Step %d of %d" % (step, NSTEPS) )
-            print( F0 )
-
-        Rt[step,:]             = Rt[step-1,:] + dtN * Vt[step-1,:] + 0.5 * dtN**2 * F0 / MASS
-        H_TC_1, E_TC_1, U_TC_1 = H_TC( Rt[step,:], MOL_DATA )
+        
+        rand_force             = np.sqrt(2 * kT * L_COEFF / dtN) * np.random.normal(0, 1, size=NMOL)
+        Rt[step,:]             = Rt[step-1,:] + dtN * b*Vt[step-1,:] + 0.5 * dtN**2 * b * (F0 + rand_force) / MASS
+        H_TC_1, E_TC_1, U_TC_1 = get_H_TC( Rt[step,:], MOL_DATA )
         U_TC_1                 = correct_phase( U_TC_1, Uold=U_TC_0 )
 
-        S_POL          = np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
-        S_el           = get_S_el( Rt[step,:], Rt[step-1,:], MOL_DATA ) # <t1|t0>
-        S_el           = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0> # (U_TC_1, S_el, U_TC_0) ???
+        Zt_pol, Zt_adF = do_electronic_propagation( step, E_TC_1, U_TC_1.astype(np.complex128), U_TC_0.astype(np.complex128), MOL_DATA["U"](Rt[step,:]).astype(np.complex128), MOL_DATA["U"](Rt[step-1,:]).astype(np.complex128), Zt_pol, Zt_adF )
 
-        Zt_pol[step,:] = np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
-        Zt_pol[step,:] = np.einsum("jk,k->j", S_el, Zt_pol[step,:])
-        Zt_pol[step,:] = np.exp(-1j * E_TC_1 * dtN) * Zt_pol[step,:]
-        Zt_adF[step,:] = np.einsum("FP,P->F", U_TC_1, Zt_pol[step,:]) # POL to adFock
+        F1             = get_TC_Force( Rt[step,:], Zt_pol[step,:], U_TC_1, MOL_DATA )
+        Vt[step,:]     = Vt[step-1,:] + 0.5 * dtN * (a*F0 + F1 ) / MASS + b * dtN * rand_force / MASS
 
-        F1         = get_TC_Force( Rt[step,:], Zt_pol[step,:], U_TC_1, MOL_DATA )
-        Vt[step,:] = Vt[step-1,:] + 0.5 * dtN * (F0 + F1) / MASS
-
-        Et[step,0] = np.sum( E_TC_1 * np.abs(Zt_pol[step,:])**2 ) # Potential Energy
-        Et[step,1] = 0.500 * MASS * np.sum(Vt[step,:]**2) # Kinetic Energy
-        Et[step,2] = Et[step,0] + Et[step,1]
+        Et[step,0]     = np.sum( E_TC_1 * np.abs(Zt_pol[step,:])**2 ) # Potential Energy
+        Et[step,1]     = 0.500 * MASS * np.sum(Vt[step,:]**2) # Kinetic Energy
+        Et[step,2]     = Et[step,0] + Et[step,1]
 
         F0     = F1
         U_TC_0 = U_TC_1
@@ -297,41 +340,69 @@ def do_Ehrenfest( R0, V0, Z0_TMP, MOL_DATA ):
 
     return Rt, Vt, Zt_pol, Zt_adF, Et
 
-def plot_POL_PES( MOL_DATA ):
+def plot_POL_PES( MOL_DATA, Rt=None ):
+    print("\tPlotting PES...")
     R_LIST = np.arange( -6,6+0.01,0.01 )
     E_TC   = np.zeros( (len(R_LIST), NPOL) )
     R_TMP  = np.zeros( NMOL )
-    R_TMP[:] = -2.5
+    R_TMP[:] = -2.6
     for Ri,R in enumerate( R_LIST ):
         R_TMP[0] = R
-        _, E_TC[Ri,:], _ = H_TC( R_TMP, MOL_DATA )
+        _, E_TC[Ri,:], _ = get_H_TC( R_TMP, MOL_DATA )
     
     for state in range( NPOL ):
         if ( state % 2 == 0 ):
-            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "-", label='P%d' % state )
+            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "-", label=(NPOL<10)*('P%d' % state) )
         else:
-            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "--", label='P%d' % state )
+            plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "--", label=(NPOL<10)*('P%d' % state) )
+
+    # Calculate Boltzmann distribution from the first PES
+    P_BOLTZMANN = np.zeros( (len(R_LIST)) )
+    for Ri,R in enumerate( R_LIST ):
+        R_TMP[0] = R
+        E_R = E_TC[Ri,0] - np.min(E_TC[:,0])
+        P_BOLTZMANN[Ri] = np.exp(-E_R/kT) # kT defined in globals
+
+    if ( Rt is not None ):
+        bins, edges = np.histogram( Rt.flatten(), bins=100 )
+        edges = (edges[:-1] + edges[1:])/2
+        SCALE_FACTOR = WC/2 / np.max(bins)
+        #print("edges:",edges)
+        #print("bins",bins)
+        plt.plot( edges, SCALE_FACTOR * bins, color="red", label="Langevin" )
+    
+    SCALE_FACTOR = WC/2 / np.max(P_BOLTZMANN)
+    plt.plot( R_LIST, SCALE_FACTOR * P_BOLTZMANN, "-", c="black", label='Boltz. Dist.' )
     plt.xlabel( "R", fontsize=15 )
-    plt.ylabel( "Energy (a.u.)", fontsize=15 )
+    plt.ylabel( "Energy (a.u.)", fontsize=15 )    
     plt.legend()
-    plt.savefig( f"{DATA_DIR}/E_TC.jpg", dpi=300 )
+    plt.tight_layout()
+    if ( Rt is not None ):
+        plt.savefig( f"{DATA_DIR}/E_TC_with_R_histogram.jpg", dpi=300 )
+    else:
+        plt.savefig( f"{DATA_DIR}/E_TC.jpg", dpi=300 )
     plt.clf()
     plt.close()
+
+    if ( Rt is not None ):
+        plt.hist( Rt.flatten(), bins=100, color="black", alpha=0.7 )
+        plt.savefig( f"{DATA_DIR}/R_histogram.jpg", dpi=300 )
+        plt.clf()
+        plt.close()
+
 
 if ( __name__ == "__main__" ):
     get_Globals()   
     MOL_DATA = interpolate_Hel()
     plot_POL_PES( MOL_DATA )
 
-    R0             = np.array([-4]*NMOL)
+    R0             = np.array([-2.5]*NMOL) #np.random.normal( -2.5, 0.25, size=NMOL )
     V0             = np.zeros(NMOL)
-    Z0             = np.zeros(NPOL)
-    Z0[INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
-    Rt, Vt, Zt_pol, Zt_adF, Et = do_Ehrenfest( R0, V0, Z0, MOL_DATA)
+    Rt, Vt, Zt_pol, Zt_adF, Et = do_Ehrenfest( R0, V0, MOL_DATA)
 
     # Plot Rt
     for mol in range( NMOL ):
-        plt.plot( TIME, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label="Molecule %d" % mol )
+        plt.plot( TIME, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Position (a.u.)", fontsize=15 )
     plt.legend()
@@ -343,7 +414,7 @@ if ( __name__ == "__main__" ):
     POP = np.abs(Zt_pol)**2
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
     for state in range( NPOL ):
-        plt.plot( TIME, POP[:,state], "-", label="P%d" % state )
+        plt.plot( TIME, POP[:,state], "-", label=(NPOL<10)*("P%d" % state) )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
@@ -354,15 +425,8 @@ if ( __name__ == "__main__" ):
     # Plot adiabatic-Fock population
     POP = np.abs(Zt_adF)**2
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    # plt.plot( TIME, POP[:,0], "-", c="black", label="$\\mathrm{GS}$" )
-    # for mol in range( 1, NPOL-1 ):
-    #     #plt.plot( TIME, POP[:,state], "-", label="MOL %d" % (mol-1) * (mol < 5) )
-    #     plt.plot( TIME, POP[:,state], "-", label="MOL %d" % (mol-1) )
-    # plt.plot( TIME, POP[:,-1], "--", c="orange", label="$\\mathrm{CAV}$" )
-    plt.plot( TIME, POP[:,0], "-", label="State %d" % (0) )
-    plt.plot( TIME, POP[:,1], "-", label="State %d" % (1) )
-    plt.plot( TIME, POP[:,2], "-", label="State %d" % (2) )
-    plt.plot( TIME, POP[:,3], "-", label="State %d" % (3) )
+    for pol in range( NPOL ):
+        plt.plot( TIME, POP[:,pol], "-", label=(NPOL<10)*("S%d" % pol) )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
@@ -377,7 +441,16 @@ if ( __name__ == "__main__" ):
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
-    plt.savefig( f"{DATA_DIR}/Et.jpg", dpi=300 )
+    plt.savefig( f"{DATA_DIR}/EPOT_EKIN_ETOT.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot total energy
+    plt.plot( TIME, Et[:,2], "--", label="ETOT" )
+    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.ylabel( "Population (a.u.)", fontsize=15 )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/ETOT.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
@@ -387,5 +460,17 @@ if ( __name__ == "__main__" ):
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Photonic Character, $\\langle \\hat{a}^\\dagger \\hat{a} \\rangle$", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/PHOTONIC.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot a histogram of the positions
+    plot_POL_PES( MOL_DATA, Rt=Rt )
+
+    # Plot the temperature
+    T = get_Temperature( Et[:,1] )
+    plt.plot( TIME, T, "-" )
+    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.ylabel( "Temperature (K)", fontsize=15 )
+    plt.savefig( f"{DATA_DIR}/TEMPERATURE.jpg", dpi=300 )
     plt.clf()
     plt.close()
