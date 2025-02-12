@@ -6,30 +6,27 @@ from time import time
 
 def get_Globals():
     global NMOL, NEL, NPOL, INIT_BASIS, INIT_STATE
-    NMOL = 25 # Number of molecules
-    NEL  = 2
-    NPOL = 1 + NMOL*(NEL-1) + 1
+    NMOL       = 5 # Number of molecules
+    NEL        = 2
+    NPOL       = 1 + NMOL*(NEL-1) + 1
     INIT_BASIS = "POL" # "adFock", "POL"
-    INIT_STATE = 0
+    INIT_STATE = -1
 
-    global TIME, NSTEPS, dtN, MASS
-    NSTEPS = 1000
-    dtN    = 10
+    global TIME, NSTEPS, dtN, MASS, NTRAJ
+    NTRAJ  = 100
+    NSTEPS = 2_000
+    dtN    = 4
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
     global A0, WC
-    A0 = 0.00
-    WC = 0.09
+    A0 = 0.05
+    WC = 0.085 # 0.085 is resonance at FC point
 
     # Langevin Part (Trapazoid Propagation)
     global L_COEFF, kT, a, b
-    L_COEFF         = 0.1 # 0.001
+    L_COEFF         = 1.0 # Friction Coefficient
     kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
-    beta            = L_COEFF / 1 # Langevin Coefficient / Mass
-    a               = (1 - beta * dtN / 2) / (1 + beta * dtN / 2)
-    b               =  1                   / (1 + beta * dtN / 2)
-
 
     # Get memory size in GB of NMOL,NPOL,NPOL ndarray
     global MEMORY_SIZE
@@ -40,7 +37,7 @@ def get_Globals():
         #exit()
 
     global DATA_DIR
-    DATA_DIR = "PLOTS_DATA/"
+    DATA_DIR = "PLOTS_DATA_NTRAJ_%d_NMOL_%d/" % (NTRAJ, NMOL)
     try: os.mkdir(DATA_DIR)
     except FileExistsError: pass
 
@@ -259,11 +256,6 @@ def get_S_el( U1, U0 ):
 
     return S_el
 
-def get_Temperature( EKIN ):
-    T  = 2 * EKIN / (3*NMOL)
-    T *= 27.2114 * 300 / 0.025
-    return T
-
 # @timer
 @njit()
 def correct_phase( Unew, Uold=None ):
@@ -289,17 +281,19 @@ def do_electronic_propagation( step, E_TC_1, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_
 
 def do_Ehrenfest( R0, V0, MOL_DATA ):
 
-    Rt = np.zeros( (NSTEPS,NMOL) )
-    Vt = np.zeros( (NSTEPS,NMOL) )
+    Rt     = np.zeros( (NSTEPS,NMOL) )
+    Vt     = np.zeros( (NSTEPS,NMOL) )
     Zt_pol = np.zeros( (NSTEPS,NPOL), dtype=np.complex128 )
     Zt_adF = np.zeros( (NSTEPS,NPOL), dtype=np.complex128 )
-    Et = np.zeros( (NSTEPS,3) )
+    Et     = np.zeros( (NSTEPS,3) )
+    EPOLt  = np.zeros( (NSTEPS,NPOL) )
 
     Rt[0,:] = R0
     Vt[0,:] = V0
 
     # Do first polaritonic structure calculation
     H_TC_0, E_TC_0, U_TC_0 = get_H_TC( Rt[0,:], MOL_DATA )
+    EPOLt[0,:] = E_TC_0
 
     if ( INIT_BASIS == "POL" ):
         Zt_pol[0,INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
@@ -308,37 +302,39 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
         Zt_adF[0,INIT_STATE] = 1.0 # {INIT_BASIS} BASIS -- see get_Globals()
         Zt_pol[0,:] = np.einsum("FP,F->P", U_TC_0, Zt_adF[0,:]) # adFock to POL
 
-    F0 = get_TC_Force( Rt[0,:], Zt_pol[0,:], U_TC_0, MOL_DATA )
+    F0  = get_TC_Force( Rt[0,:], Zt_pol[0,:], U_TC_0, MOL_DATA )
+    RF0 = np.sqrt(2 * kT * L_COEFF / dtN) * np.random.normal(0, 1, size=NMOL)
 
     Et[0,0] = np.sum( E_TC_0 * np.abs(Zt_pol[0,:])**2 ) # Potential Energy
     Et[0,1] = 0.500 * MASS * np.sum(Vt[0,:]**2) # Kinetic Energy
     Et[0,2] = Et[0,0] + Et[0,1]
 
     for step in range( 1, NSTEPS ):
-        if ( step == 2 or step % 100 == 0 ):
-            print( "Step %d of %d" % (step, NSTEPS) )
+        #if ( step == 2 or step % 100 == 0 ):
+        #    print( "Step %d of %d" % (step, NSTEPS) )
         
-        rand_force             = np.sqrt(2 * kT * L_COEFF / dtN) * np.random.normal(0, 1, size=NMOL)
-        Rt[step,:]             = Rt[step-1,:] + dtN * b*Vt[step-1,:] + 0.5 * dtN**2 * b * (F0 + rand_force) / MASS
+        
+        Vt[step,:]             = Vt[step-1] + 0.5 * dtN * (F0 - L_COEFF * Vt[step-1] + RF0 ) / MASS
+        Rt[step,:]             = Rt[step-1] +  + dtN * Vt[step]
         H_TC_1, E_TC_1, U_TC_1 = get_H_TC( Rt[step,:], MOL_DATA )
         U_TC_1                 = correct_phase( U_TC_1, Uold=U_TC_0 )
-
-        Zt_pol, Zt_adF = do_electronic_propagation( step, E_TC_1, U_TC_1.astype(np.complex128), U_TC_0.astype(np.complex128), MOL_DATA["U"](Rt[step,:]).astype(np.complex128), MOL_DATA["U"](Rt[step-1,:]).astype(np.complex128), Zt_pol, Zt_adF )
-
-        F1             = get_TC_Force( Rt[step,:], Zt_pol[step,:], U_TC_1, MOL_DATA )
-        Vt[step,:]     = Vt[step-1,:] + 0.5 * dtN * (a*F0 + F1 ) / MASS + b * dtN * rand_force / MASS
+        Zt_pol, Zt_adF         = do_electronic_propagation( step, E_TC_1, U_TC_1.astype(np.complex128), U_TC_0.astype(np.complex128), MOL_DATA["U"](Rt[step,:]).astype(np.complex128), MOL_DATA["U"](Rt[step-1,:]).astype(np.complex128), Zt_pol, Zt_adF )
+        F1                     = get_TC_Force( Rt[step], Zt_pol[step], U_TC_1, MOL_DATA )
+        RF1                    = np.sqrt(2 * kT * L_COEFF / dtN) * np.random.normal(0, 1, size=NMOL)
+        Vt[step,:]             = Vt[step] + 0.5 * dtN * (F1 - L_COEFF * Vt[step] + RF1 ) / MASS
 
         Et[step,0]     = np.sum( E_TC_1 * np.abs(Zt_pol[step,:])**2 ) # Potential Energy
         Et[step,1]     = 0.500 * MASS * np.sum(Vt[step,:]**2) # Kinetic Energy
         Et[step,2]     = Et[step,0] + Et[step,1]
-
+        EPOLt[step,:]  = E_TC_1
+        
         F0     = F1
+        RF0    = RF1
         U_TC_0 = U_TC_1
         E_TC_0 = E_TC_1
         H_TC_0 = H_TC_1
 
-
-    return Rt, Vt, Zt_pol, Zt_adF, Et
+    return Rt, Vt, Zt_pol, Zt_adF, Et,EPOLt
 
 def plot_POL_PES( MOL_DATA, Rt=None ):
     print("\tPlotting PES...")
@@ -362,19 +358,40 @@ def plot_POL_PES( MOL_DATA, Rt=None ):
         R_TMP[0] = R
         E_R = E_TC[Ri,0] - np.min(E_TC[:,0])
         P_BOLTZMANN[Ri] = np.exp(-E_R/kT) # kT defined in globals
-
+   
+    SCALE_FACTOR = WC/2 / np.max(P_BOLTZMANN)
+    plt.plot( R_LIST, SCALE_FACTOR * P_BOLTZMANN, "-", c="black", label='$\\mathcal{P} \\sim \\mathrm{exp}[-E_0/kT]$' )
+    plt.xlabel( "R", fontsize=15 )
+    plt.ylabel( "Energy (a.u.)", fontsize=15 )    
     if ( Rt is not None ):
         bins, edges = np.histogram( Rt.flatten(), bins=100 )
         edges = (edges[:-1] + edges[1:])/2
         SCALE_FACTOR = WC/2 / np.max(bins)
-        #print("edges:",edges)
-        #print("bins",bins)
-        plt.plot( edges, SCALE_FACTOR * bins, color="red", label="Langevin" )
-    
-    SCALE_FACTOR = WC/2 / np.max(P_BOLTZMANN)
-    plt.plot( R_LIST, SCALE_FACTOR * P_BOLTZMANN, "-", c="black", label='Boltz. Dist.' )
-    plt.xlabel( "R", fontsize=15 )
-    plt.ylabel( "Energy (a.u.)", fontsize=15 )    
+        plt.plot( edges, SCALE_FACTOR * bins, "--", color="green", label="Langevin Distr." )
+
+    # Do nuclear DVR
+    NR   = 1001
+    RDVR = np.linspace( -6, 6, NR )
+    dR   = RDVR[1] - RDVR[0]
+    T    = np.zeros( (NR,NR) )
+    for Ri in range( NR ):
+        for Rj in range( NR ):
+            if ( Ri == Rj ):
+                T[Ri,Ri] = np.pi**2 / 3
+            else:
+                T[Ri,Rj] = (-1)**(Ri-Rj) * 2 / (Ri-Rj)**2
+    T /= 2 * dR**2 * MASS
+    V = np.zeros( (NR) )
+    R_TMP    = np.zeros( NMOL )
+    R_TMP[:] = -2.6
+    for Ri,R in enumerate( RDVR ):
+        R_TMP[0]   = R
+        _, ENOW, _ = get_H_TC( R_TMP, MOL_DATA )
+        V[Ri]      = ENOW[0]
+    E, U = np.linalg.eigh( T + np.diag(V) )
+    SCALE_FACTOR = WC/2 / np.max(np.abs(U[:,0])**2)
+    plt.plot( RDVR, SCALE_FACTOR * np.abs(U[:,0])**2, "-.", color="red", label="DVR" )
+
     plt.legend()
     plt.tight_layout()
     if ( Rt is not None ):
@@ -384,21 +401,45 @@ def plot_POL_PES( MOL_DATA, Rt=None ):
     plt.clf()
     plt.close()
 
-    if ( Rt is not None ):
-        plt.hist( Rt.flatten(), bins=100, color="black", alpha=0.7 )
-        plt.savefig( f"{DATA_DIR}/R_histogram.jpg", dpi=300 )
-        plt.clf()
-        plt.close()
+    return R_LIST, P_BOLTZMANN
+
+
 
 
 if ( __name__ == "__main__" ):
     get_Globals()   
-    MOL_DATA = interpolate_Hel()
-    plot_POL_PES( MOL_DATA )
+    MOL_DATA            = interpolate_Hel()
+    R_LIST, P_BOLTZMANN = plot_POL_PES( MOL_DATA )
 
-    R0             = np.array([-2.5]*NMOL) #np.random.normal( -2.5, 0.25, size=NMOL )
-    V0             = np.zeros(NMOL)
-    Rt, Vt, Zt_pol, Zt_adF, Et = do_Ehrenfest( R0, V0, MOL_DATA)
+    Rt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
+    Vt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
+    Zt_pol = np.zeros( (NTRAJ,NSTEPS,NPOL), dtype=np.complex128 )
+    Zt_adF = np.zeros( (NTRAJ,NSTEPS,NPOL), dtype=np.complex128 )
+    Et     = np.zeros( (NTRAJ,NSTEPS,3) )
+    EPOLt  = np.zeros( (NTRAJ,NSTEPS,NPOL) )
+
+    for traj in range( NTRAJ ):
+        print( "Trajectory %d of %d" % (traj, NTRAJ) )
+        R0             = np.random.choice(R_LIST, size=NMOL, p=P_BOLTZMANN/np.sum(P_BOLTZMANN)) # np.array([-2.5]*NMOL) #np.random.normal( -2.5, 0.25, size=NMOL )
+        V0             = np.zeros(NMOL)
+        Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
+
+    # Plot a histogram of the positions
+    plot_POL_PES( MOL_DATA, Rt=Rt )
+
+    # Save data
+    np.save( f"{DATA_DIR}/R.npy", Rt )
+    np.save( f"{DATA_DIR}/V.npy", Vt )
+    np.save( f"{DATA_DIR}/Z_POL.npy", Zt_pol )
+    np.save( f"{DATA_DIR}/Z_adF.npy", Zt_adF )
+    np.save( f"{DATA_DIR}/E.npy", Et )
+    np.save( f"{DATA_DIR}/EPOL.npy", EPOLt )
+
+    # Average over trajectories
+    Rt    = np.average( Rt   , axis=0 )
+    Vt    = np.average( Vt   , axis=0 )
+    Et    = np.average( Et   , axis=0 )
+    EPOLt = np.average( EPOLt, axis=0 )
 
     # Plot Rt
     for mol in range( NMOL ):
@@ -412,9 +453,16 @@ if ( __name__ == "__main__" ):
 
     # Plot Polaritonic Population
     POP = np.abs(Zt_pol)**2
+    POP = np.average(POP, axis=0)
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    for state in range( NPOL ):
-        plt.plot( TIME, POP[:,state], "-", label=(NPOL<10)*("P%d" % state) )
+    if ( NPOL<10 ):
+        for state in range( NPOL ):
+            plt.plot( TIME, POP[:,state], "-", label="P%d" % state )
+    else:
+        for pol in range( 1,NPOL-1 ):
+            plt.plot( TIME, POP[:,pol], "-", c='black', lw=2 )
+        plt.plot( TIME, POP[:,0], lw=4, alpha=0.5, label="P0" )
+        plt.plot( TIME, POP[:,-1], lw=4, alpha=0.5, label="P%s" % (NPOL-1) )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
@@ -424,9 +472,18 @@ if ( __name__ == "__main__" ):
 
     # Plot adiabatic-Fock population
     POP = np.abs(Zt_adF)**2
+    POP = np.average(POP, axis=0)
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    for pol in range( NPOL ):
-        plt.plot( TIME, POP[:,pol], "-", label=(NPOL<10)*("S%d" % pol) )
+    if ( NPOL<10 ):
+        for pol in range( NPOL ):
+            plt.plot( TIME, POP[:,pol], "-", label="S%d" % pol )
+    else:
+        for pol in range( 1,NPOL-1 ):
+            plt.plot( TIME, POP[:,pol], "-", c='black', lw=2 )
+        plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
+        plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
+        plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Dark" )
+
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
@@ -455,22 +512,50 @@ if ( __name__ == "__main__" ):
     plt.close()
 
     # Plot the average photonic character
-    ada = Zt_adF[:,-1]**2
-    plt.plot( TIME, np.abs(ada), "-" )
+    PHOT = np.abs(Zt_adF[:,:,-1])**2
+    PHOT = np.average(PHOT, axis=0)
+    plt.plot( TIME, PHOT, "-" )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Photonic Character, $\\langle \\hat{a}^\\dagger \\hat{a} \\rangle$", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/PHOTONIC.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
-    # Plot a histogram of the positions
-    plot_POL_PES( MOL_DATA, Rt=Rt )
-
     # Plot the temperature
-    T = get_Temperature( Et[:,1] )
+    T  = 2 * Et[:,1] / NMOL / (0.025 / 300 / 27.2114)  # in Kelvin
     plt.plot( TIME, T, "-" )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Temperature (K)", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/TEMPERATURE.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot the polariton energies
+    time_color = np.linspace( 0, 1, NSTEPS )
+    cmap = plt.get_cmap('terrain')
+    for p in range( NPOL ):
+        plt.scatter( Rt[:,0], EPOLt[:,p] - EPOLt[0,0], s=1, color=cmap(time_color[:]) )
+    plt.xlabel( "Position, $R_0$ (a.u.)", fontsize=15 )
+    plt.ylabel( "Energy (a.u.)", fontsize=15 )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/PES_R0.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Calculate the inverse participation ratio
+    IPR = np.zeros( (NTRAJ,NSTEPS) )
+    for traj in range( NTRAJ ):
+        for step in range( NSTEPS ):
+            WFN  = Zt_adF[traj,step,1:-1] # Exclude G0 and G1. Keep only local mol excitations.
+            PROB = np.abs(WFN)*2
+            NORM = np.sum( PROB )
+            PROB = PROB / NORM
+            IPR[traj,step] = 1 / np.sum( PROB**2 )
+    IPR = np.average( IPR, axis=0 )
+    plt.plot( TIME, IPR / NMOL, "-" )
+    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.ylabel( "% IPR ($\\frac{IPR}{N_\\mathrm{mol}}$)", fontsize=15 )
+    plt.tight_layout()
+    plt.savefig( f"{DATA_DIR}/IPR.jpg", dpi=300 )
     plt.clf()
     plt.close()
