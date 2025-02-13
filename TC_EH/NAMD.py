@@ -2,11 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from numba import njit
-from time import time
+from time import time, sleep
 
 def get_Globals():
     global NMOL, NEL, NPOL, INIT_BASIS, INIT_STATE
-    NMOL       = 5 # Number of molecules
+    NMOL       = 50 # Number of molecules
     NEL        = 2
     NPOL       = 1 + NMOL*(NEL-1) + 1
     INIT_BASIS = "POL" # "adFock", "POL"
@@ -23,9 +23,9 @@ def get_Globals():
     A0 = 0.05
     WC = 0.085 # 0.085 is resonance at FC point
 
-    # Langevin Part (Trapazoid Propagation)
+    # Langevin Part (Fluctuation-Dissipation Verlet Propagation)
     global L_COEFF, kT, a, b
-    L_COEFF         = 1.0 # Friction Coefficient
+    L_COEFF         = 1.0 # Friction Coefficient (i.e., How fast to get to kT temperature ?)
     kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
 
     # Get memory size in GB of NMOL,NPOL,NPOL ndarray
@@ -33,7 +33,8 @@ def get_Globals():
     MEMORY_SIZE = NMOL * NPOL * NPOL * 8 / 1024**3
     print( "Memory size of Force matrix (GB): %1.3f GB" % MEMORY_SIZE )
     if ( MEMORY_SIZE > 2 ):
-        print( "Force matrix is too big for head node, reduce NMOL." )
+        print( "Force matrix is too big for head node.\nI hope this is submitted to the cluster.\n\tIf not, kill this job." )
+        sleep(10)
         #exit()
 
     global DATA_DIR
