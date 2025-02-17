@@ -1,14 +1,16 @@
 #!/bin/bash
-#SBATCH -p action
+#SBATCH -p exciton -A exciton
 #SBATCH -J TC_NAMD
 #SBATCH -o output.slurm
 #SBATCH -t 1-00:00:00
 #SBATCH -N 1
-#SBATCH --ntasks-per-node=24
-#SBATCH --mem 60GB
+#SBATCH --ntasks-per-node=12
+#SBATCH --mem 30GB
 
-export OMP_NUM_THREADS=24
-export MKL_NUM_THREADS=24
+export OMP_NUM_THREADS=12
+export MKL_NUM_THREADS=12
 
-python3 NAMD.py
+# $1 -- Number of molecules
+
+python3 NAMD.py $1
 

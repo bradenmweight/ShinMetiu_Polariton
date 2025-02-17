@@ -3,16 +3,17 @@ import matplotlib.pyplot as plt
 import os
 from numba import njit
 from time import time, sleep
+from sys import argv
 
 def get_Globals():
     global NMOL, NEL, NPOL, INIT_BASIS, INIT_STATE
-    NMOL       = 50 # Number of molecules
+    NMOL       = int(argv[1]) # Number of molecules
     NEL        = 2
     NPOL       = 1 + NMOL*(NEL-1) + 1
     INIT_BASIS = "POL" # "adFock", "POL"
     INIT_STATE = -1
 
-    global TIME, NSTEPS, dtN, MASS, NTRAJ
+    global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
     NTRAJ  = 100
     NSTEPS = 2_000
     dtN    = 4
@@ -468,6 +469,10 @@ if ( __name__ == "__main__" ):
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/POP_POL.jpg", dpi=300 )
+    # Save another version with logarithmic y-axis
+    plt.yscale('log')
+    plt.ylim(1e-4,1)
+    plt.savefig( f"{DATA_DIR}/POP_POL_log.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
@@ -476,8 +481,11 @@ if ( __name__ == "__main__" ):
     POP = np.average(POP, axis=0)
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
     if ( NPOL<10 ):
-        for pol in range( NPOL ):
-            plt.plot( TIME, POP[:,pol], "-", label="S%d" % pol )
+        plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
+        for pol in range( 1,NPOL-1 ):
+            plt.plot( TIME, POP[:,pol], "-", c="black", label="$|E_%d,0\\rangle$" % pol )
+        plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Dark" )
+        plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
     else:
         for pol in range( 1,NPOL-1 ):
             plt.plot( TIME, POP[:,pol], "-", c='black', lw=2 )
@@ -489,6 +497,10 @@ if ( __name__ == "__main__" ):
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/POP_adF.jpg", dpi=300 )
+    # Save another version with logarithmic y-axis
+    plt.yscale('log')
+    plt.ylim(1e-4,1)
+    plt.savefig( f"{DATA_DIR}/POP_adF_log.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
