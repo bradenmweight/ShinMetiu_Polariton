@@ -14,7 +14,7 @@ def get_Globals():
     INIT_STATE = -1
 
     global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
-    NTRAJ  = 1 # 100
+    NTRAJ  = 100
     NSTEPS = 2_000
     dtN    = 4
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
@@ -271,7 +271,7 @@ def correct_phase( Unew, Uold=None ):
 @njit()
 def do_electronic_propagation( step, E_TC_1, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_adF ):
     S_POL          = U_TC_1.T @ U_TC_0 # np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
-    S_el           = get_S_el( U1 * 1, U0 * 1 ) # <t1|t0>
+    S_el           = get_S_el( U1, U0 ) # <t1|t0>
     S_el[:,:]      = U_TC_0.T @ S_el @ U_TC_0 # S_el = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0>
 
     Zt_pol[step,:] = S_POL @ Zt_pol[step-1,:] # np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
@@ -337,7 +337,7 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
 
     return Rt, Vt, Zt_pol, Zt_adF, Et,EPOLt
 
-def plot_POL_PES( MOL_DATA, Rt=None ):
+def plot_POL_PES( MOL_DATA, Rt=None, Vt=None ):
     print("\tPlotting PES...")
     R_LIST = np.arange( -6,6+0.01,0.01 )
     E_TC   = np.zeros( (len(R_LIST), NPOL) )
@@ -354,14 +354,20 @@ def plot_POL_PES( MOL_DATA, Rt=None ):
             plt.plot( R_LIST, E_TC[:,state] - np.min(E_TC[:,0]), "--", label=(NPOL<10)*('P%d' % state) )
 
     # Calculate Boltzmann distribution from the first PES
-    P_BOLTZMANN = np.zeros( (len(R_LIST)) )
+    R_BOLTZMANN = np.zeros( (len(R_LIST)) )
     for Ri,R in enumerate( R_LIST ):
         R_TMP[0] = R
         E_R = E_TC[Ri,0] - np.min(E_TC[:,0])
-        P_BOLTZMANN[Ri] = np.exp(-E_R/kT) # kT defined in globals
-   
-    SCALE_FACTOR = WC/2 / np.max(P_BOLTZMANN)
-    plt.plot( R_LIST, SCALE_FACTOR * P_BOLTZMANN, "-", c="black", label='$\\mathcal{P} \\sim \\mathrm{exp}[-E_0/kT]$' )
+        R_BOLTZMANN[Ri] = np.exp(-E_R/kT) # kT defined in globals
+    
+    # Calculate Maxwell-Boltzmann velocity distribution from the temperature and mass
+    V_LIST              = np.linspace(0,0.003,5000)
+    V_BOLTZMANN         = np.exp( -MASS * V_LIST**2 / 2 / kT ) # V_LIST**2 * np.exp( -MASS * V_LIST**2 / kT )
+    R_BOLTZMANN         = R_BOLTZMANN / np.sum(R_BOLTZMANN)
+    V_BOLTZMANN         = V_BOLTZMANN / np.sum(V_BOLTZMANN)
+
+    SCALE_FACTOR = WC/2 / np.max(R_BOLTZMANN)
+    plt.plot( R_LIST, SCALE_FACTOR * R_BOLTZMANN, "-", c="black", label='$\\mathcal{P} \\sim \\mathrm{exp}[-E_0/kT]$' )
     plt.xlabel( "R", fontsize=15 )
     plt.ylabel( "Energy (a.u.)", fontsize=15 )    
     if ( Rt is not None ):
@@ -402,15 +408,31 @@ def plot_POL_PES( MOL_DATA, Rt=None ):
     plt.clf()
     plt.close()
 
-    return R_LIST, P_BOLTZMANN
+    # Make velcoity histogram if Vt is not None
+    if ( Vt is not None ):
+        plt.plot( V_LIST, V_BOLTZMANN / np.max(V_BOLTZMANN), "-", label='$\\mathcal{P} \\sim v^2 \\mathrm{exp}[-mv^2/2kT]$' )
+        bins, edges = np.histogram( np.abs(Vt).flatten(), bins=100 )
+        print( "Average of Vt", np.average( np.abs(Vt) ) )
+        edges = (edges[:-1] + edges[1:])/2
+        plt.plot( edges, bins / np.max(bins), "--", color="green", label="Langevin Distr." )
+        plt.xlabel( "V", fontsize=15 )
+        plt.ylabel( "Probability", fontsize=15 )
+        plt.xlim(0.0,0.005)
+        plt.legend()
+        plt.savefig( f"{DATA_DIR}/V_HISTOGRAM.jpg", dpi=300 )
+        plt.clf()
+        plt.close()
+
+    return R_LIST, R_BOLTZMANN, V_LIST, V_BOLTZMANN
 
 
 
 
 if ( __name__ == "__main__" ):
     get_Globals()   
-    MOL_DATA            = interpolate_Hel()
-    R_LIST, P_BOLTZMANN = plot_POL_PES( MOL_DATA )
+    MOL_DATA                                 = interpolate_Hel()
+    R_LIST, R_BOLTZMANN, V_LIST, V_BOLTZMANN = plot_POL_PES( MOL_DATA )
+
 
     Rt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
     Vt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
@@ -421,16 +443,18 @@ if ( __name__ == "__main__" ):
 
     for traj in range( NTRAJ ):
         print( "Trajectory %d of %d" % (traj, NTRAJ) )
-        R0             = np.random.choice(R_LIST, size=NMOL, p=P_BOLTZMANN/np.sum(P_BOLTZMANN)) # np.array([-2.5]*NMOL) #np.random.normal( -2.5, 0.25, size=NMOL )
-        V0             = np.zeros(NMOL) # TODO -- IMPLEMENT BOLTZMANN VELOCITY DISTRIBUTION
+        R0             = np.random.choice(R_LIST, size=NMOL, p=R_BOLTZMANN)
+        V0             = np.random.choice(V_LIST, size=NMOL, p=V_BOLTZMANN)
+        T  = 2 * (0.500 * MASS * np.sum(V0**2)) / NMOL / (0.025 / 300 / 27.2114)
+        print("Initial Temperature: %1.2f K" % T )
         Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
 
     # Plot a histogram of the positions
-    plot_POL_PES( MOL_DATA, Rt=Rt )
+    plot_POL_PES( MOL_DATA, Rt=Rt, Vt=Vt )
 
     # Save data
     np.save( f"{DATA_DIR}/R.npy", Rt )
-    # np.save( f"{DATA_DIR}/V.npy", Vt )
+    np.save( f"{DATA_DIR}/V.npy", Vt )
     np.save( f"{DATA_DIR}/Z_POL.npy", Zt_pol )
     np.save( f"{DATA_DIR}/Z_adF.npy", Zt_adF )
     np.save( f"{DATA_DIR}/E.npy", Et )
@@ -438,7 +462,7 @@ if ( __name__ == "__main__" ):
 
     # Average over trajectories
     Rt    = np.average( Rt   , axis=0 )
-    # Vt    = np.average( Vt   , axis=0 )
+    Vt    = np.average( Vt   , axis=0 )
     Et    = np.average( Et   , axis=0 )
     EPOLt = np.average( EPOLt, axis=0 )
 
@@ -449,6 +473,16 @@ if ( __name__ == "__main__" ):
     plt.ylabel( "Position (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/R.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot Vt
+    for mol in range( NMOL ):
+        plt.plot( TIME, Vt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
+    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.ylabel( "Velocity (a.u.)", fontsize=15 )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/V.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
@@ -530,17 +564,17 @@ if ( __name__ == "__main__" ):
     plt.clf()
     plt.close()
 
-    # Plot the polariton energies
-    time_color = np.linspace( 0, 1, NSTEPS )
-    cmap = plt.get_cmap('terrain')
-    for p in range( NPOL ):
-        plt.scatter( Rt[:,0], EPOLt[:,p] - EPOLt[0,0], s=1, color=cmap(time_color[:]) )
-    plt.xlabel( "Position, $R_0$ (a.u.)", fontsize=15 )
-    plt.ylabel( "Energy (a.u.)", fontsize=15 )
-    plt.legend()
-    plt.savefig( f"{DATA_DIR}/PES_R0.jpg", dpi=300 )
-    plt.clf()
-    plt.close()
+    # # Plot the polariton energies along R0 coordinate
+    # time_color = np.linspace( 0, 1, NSTEPS )
+    # cmap = plt.get_cmap('terrain')
+    # for p in range( NPOL ):
+    #     plt.scatter( Rt[:,0], EPOLt[:,p] - EPOLt[0,0], s=1, color=cmap(time_color[:]) )
+    # plt.xlabel( "Position, $R_0$ (a.u.)", fontsize=15 )
+    # plt.ylabel( "Energy (a.u.)", fontsize=15 )
+    # plt.legend()
+    # plt.savefig( f"{DATA_DIR}/PES_R0.jpg", dpi=300 )
+    # plt.clf()
+    # plt.close()
 
     # Calculate the inverse participation ratio
     IPR = np.zeros( (NTRAJ,NSTEPS) )
