@@ -15,8 +15,9 @@ def get_Globals():
 
     global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
     NTRAJ  = 100
-    NSTEPS = 2_000
-    dtN    = 4
+    NTIME  = 1 # ps
+    dtN    = 0.5*41.341 # fs to a.u.
+    NSTEPS = int(NTIME * 1000 * 41.341 / dtN) + 1 # 2_000
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
@@ -27,7 +28,8 @@ def get_Globals():
     # Langevin Part (Fluctuation-Dissipation Verlet Propagation)
     global L_COEFF, kT, a, b
     L_COEFF         = 1.0 # Friction Coefficient (i.e., How fast to get to kT temperature ?)
-    kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
+    #kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
+    kT              = 200 * (0.025 / 300 / 27.2114) # Temperature in Hartree
 
     # Get memory size in GB of NMOL,NPOL,NPOL ndarray
     global MEMORY_SIZE
@@ -289,6 +291,7 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
     Zt_adF = np.zeros( (NSTEPS,NPOL), dtype=np.complex128 )
     Et     = np.zeros( (NSTEPS,3) )
     EPOLt  = np.zeros( (NSTEPS,NPOL) )
+    PHOT   = np.zeros( (NSTEPS,NPOL) )
 
     Rt[0,:] = R0
     Vt[0,:] = V0
@@ -310,6 +313,9 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
     Et[0,0] = np.sum( E_TC_0 * np.abs(Zt_pol[0,:])**2 ) # Potential Energy
     Et[0,1] = 0.500 * MASS * np.sum(Vt[0,:]**2) # Kinetic Energy
     Et[0,2] = Et[0,0] + Et[0,1]
+    N_OP_adF     = np.zeros(NPOL)
+    N_OP_adF[-1] = 1.0
+    PHOT[0,:]  = np.abs(U_TC_0[-1,:])**2
 
     for step in range( 1, NSTEPS ):
         #if ( step == 2 or step % 100 == 0 ):
@@ -328,6 +334,7 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
         Et[step,1]     = 0.500 * MASS * np.sum(Vt[step,:]**2) # Kinetic Energy
         Et[step,2]     = Et[step,0] + Et[step,1]
         EPOLt[step,:]  = E_TC_1
+        PHOT[step,:]   = np.abs(U_TC_1[-1,:])**2
         
         F0     = F1
         RF0    = RF1
@@ -335,7 +342,7 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
         E_TC_0 = E_TC_1
         H_TC_0 = H_TC_1
 
-    return Rt, Vt, Zt_pol, Zt_adF, Et,EPOLt
+    return Rt, Vt, Zt_pol, Zt_adF, Et,EPOLt, PHOT
 
 def plot_POL_PES( MOL_DATA, Rt=None, Vt=None ):
     print("\tPlotting PES...")
@@ -412,7 +419,6 @@ def plot_POL_PES( MOL_DATA, Rt=None, Vt=None ):
     if ( Vt is not None ):
         plt.plot( V_LIST, V_BOLTZMANN / np.max(V_BOLTZMANN), "-", label='$\\mathcal{P} \\sim v^2 \\mathrm{exp}[-mv^2/2kT]$' )
         bins, edges = np.histogram( np.abs(Vt).flatten(), bins=100 )
-        print( "Average of Vt", np.average( np.abs(Vt) ) )
         edges = (edges[:-1] + edges[1:])/2
         plt.plot( edges, bins / np.max(bins), "--", color="green", label="Langevin Distr." )
         plt.xlabel( "V", fontsize=15 )
@@ -433,21 +439,21 @@ if ( __name__ == "__main__" ):
     MOL_DATA                                 = interpolate_Hel()
     R_LIST, R_BOLTZMANN, V_LIST, V_BOLTZMANN = plot_POL_PES( MOL_DATA )
 
-
     Rt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
     Vt     = np.zeros( (NTRAJ,NSTEPS,NMOL) )
     Zt_pol = np.zeros( (NTRAJ,NSTEPS,NPOL), dtype=np.complex128 )
     Zt_adF = np.zeros( (NTRAJ,NSTEPS,NPOL), dtype=np.complex128 )
     Et     = np.zeros( (NTRAJ,NSTEPS,3) )
     EPOLt  = np.zeros( (NTRAJ,NSTEPS,NPOL) )
+    PHOT   = np.zeros( (NTRAJ,NSTEPS,NPOL) )
 
     for traj in range( NTRAJ ):
         print( "Trajectory %d of %d" % (traj, NTRAJ) )
         R0             = np.random.choice(R_LIST, size=NMOL, p=R_BOLTZMANN)
         V0             = np.random.choice(V_LIST, size=NMOL, p=V_BOLTZMANN)
         T  = 2 * (0.500 * MASS * np.sum(V0**2)) / NMOL / (0.025 / 300 / 27.2114)
-        print("Initial Temperature: %1.2f K" % T )
-        Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
+        print("\tInitial Temperature: %1.2f K" % T )
+        Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj], PHOT[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
 
     # Plot a histogram of the positions
     plot_POL_PES( MOL_DATA, Rt=Rt, Vt=Vt )
@@ -459,12 +465,16 @@ if ( __name__ == "__main__" ):
     np.save( f"{DATA_DIR}/Z_adF.npy", Zt_adF )
     np.save( f"{DATA_DIR}/E.npy", Et )
     np.save( f"{DATA_DIR}/EPOL.npy", EPOLt )
+    np.save( f"{DATA_DIR}/PHOT.npy", PHOT )
+
+    TEMP  = 2 * Et[:,:,1] / NMOL / (0.025 / 300 / 27.2114)  # in Kelvin
+    TEMP  = np.average(TEMP, axis=0)
 
     # Average over trajectories
     Rt    = np.average( Rt   , axis=0 )
     Vt    = np.average( Vt   , axis=0 )
     Et    = np.average( Et   , axis=0 )
-    EPOLt = np.average( EPOLt, axis=0 )
+    #EPOLt = np.average( EPOLt, axis=0 )
 
     # Plot Rt
     for mol in range( NMOL ):
@@ -546,9 +556,9 @@ if ( __name__ == "__main__" ):
     plt.close()
 
     # Plot the average photonic character
-    PHOT = np.abs(Zt_adF[:,:,-1])**2
-    PHOT = np.average(PHOT, axis=0)
-    plt.plot( TIME, PHOT, "-" )
+    PHOT_wfn = np.abs(Zt_adF[:,:,-1])**2
+    PHOT_wfn = np.average(PHOT_wfn, axis=0)
+    plt.plot( TIME, PHOT_wfn, "-" )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Photonic Character, $\\langle \\hat{a}^\\dagger \\hat{a} \\rangle$", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/PHOTONIC.jpg", dpi=300 )
@@ -556,8 +566,7 @@ if ( __name__ == "__main__" ):
     plt.close()
 
     # Plot the temperature
-    T  = 2 * Et[:,1] / NMOL / (0.025 / 300 / 27.2114)  # in Kelvin
-    plt.plot( TIME, T, "-" )
+    plt.plot( TIME, TEMP, "-" )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Temperature (K)", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/TEMPERATURE.jpg", dpi=300 )
@@ -575,6 +584,54 @@ if ( __name__ == "__main__" ):
     # plt.savefig( f"{DATA_DIR}/PES_R0.jpg", dpi=300 )
     # plt.clf()
     # plt.close()
+
+    fig = plt.figure(figsize=(6, 6))
+    gs = fig.add_gridspec(1, 2,  width_ratios=(4, 1),
+                        left=0.12, right=0.95, bottom=0.12, top=0.95,
+                        wspace=0.05)
+    ax = fig.add_subplot( gs[0, 0] )
+    ax_hist = fig.add_subplot( gs[0, 1] )
+    EPOLt *= 27.2114
+    for p in range( 1, NPOL ): # Plot first trajectory only
+        ax.plot( TIME/41.341, EPOLt[0,:,p] - EPOLt[0,:,0], c="black", alpha=0.25, lw=1 )
+    ax.plot( TIME/41.341, np.average(EPOLt[:,:,-1] - EPOLt[:,:,0], axis=0), c="blue", lw=4, alpha=0.75, label="$\\langle$UP$\\rangle$" ) # AVE UP
+    ax.plot( TIME/41.341, np.average(EPOLt[:,:,2:-1] - EPOLt[:,:,0][:,:,None], axis=(0,2)), lw=4, c="green", alpha=0.75, label="$\\langle$MP$\\rangle$" ) # AVE UP
+    ax.plot( TIME/41.341, np.average(EPOLt[:,:,1]  - EPOLt[:,:,0], axis=0), c="red", lw=4, alpha=0.75, label="$\\langle$LP$\\rangle$" ) # AVE UP
+    ax.plot( TIME/41.341, TIME*0 + WC*27.2114, "--", alpha=0.75, lw=2, c="orange", label="$\\omega_\\mathrm{c}$" ) # WC
+
+    ax.set_ylabel( "Transition Energy (eV)", fontsize=15 )
+    ax.set_xlabel( "Time (fs)", fontsize=15 )
+
+    NBINS = 100
+    EMIN  = np.min(EPOLt[:,:,1:] - EPOLt[:,:,0][:,:,None])
+    EMAX  = np.max(EPOLt[:,:,1:] - EPOLt[:,:,0][:,:,None])
+    EBIN  = np.linspace( EMIN, EMAX, NBINS )
+    DOS  = np.zeros( NBINS-1 )
+    TM   = np.zeros( NBINS-1 )
+    for b in range( NBINS-1 ):
+        for traj in range( NTRAJ ):
+            for ti in range( NSTEPS ):
+                for p in range( 1, NPOL ):
+                    if ( EPOLt[traj,ti,p] - EPOLt[traj,ti,0] >= EBIN[b] and EPOLt[traj,ti,p] - EPOLt[traj,ti,0] < EBIN[b+1] ):
+                        DOS[b] += 1.0
+                        TM[b]  += PHOT[traj,ti,p]
+    EBIN = (EBIN[:-1] + EBIN[1:])/2
+    ax_hist.semilogx( DOS/np.max(DOS), EBIN, c="black" )
+    ax_hist.semilogx( TM/np.max(TM), EBIN, c="red" )
+    ax.set_xlim( 0, TIME[-2]/41.341 )
+    ax_hist.set_xlim( 1e-2, 1 )
+    ax_hist.set_ylim( ax.get_ylim() )
+    #ax_hist.tick_params(axis="x", labelbottom=False)
+    ax_hist.tick_params(axis="y", labelleft=False)
+    #ax_hist.set_xlabel( "log[SPEC]", fontsize=15 )
+    #ax_hist.tick_params(axis='y', labelcolor='k')
+    #ax_hist.set_ylabel( "DOS (arb.)", fontsize=15 )
+    ax.legend()
+    plt.savefig( f"{DATA_DIR}/PES_time.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+
 
     # Calculate the inverse participation ratio
     IPR = np.zeros( (NTRAJ,NSTEPS) )
