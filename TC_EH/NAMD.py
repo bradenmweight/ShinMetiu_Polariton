@@ -14,7 +14,7 @@ def get_Globals():
     INIT_STATE = -1
 
     global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
-    NTRAJ  = 100
+    NTRAJ  = 1 # 100
     NSTEPS = 2_000
     dtN    = 4
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
@@ -271,7 +271,7 @@ def correct_phase( Unew, Uold=None ):
 @njit()
 def do_electronic_propagation( step, E_TC_1, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_adF ):
     S_POL          = U_TC_1.T @ U_TC_0 # np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
-    S_el           = get_S_el( U1, U0 ) # <t1|t0>
+    S_el           = get_S_el( U1 * 1, U0 * 1 ) # <t1|t0>
     S_el[:,:]      = U_TC_0.T @ S_el @ U_TC_0 # S_el = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0>
 
     Zt_pol[step,:] = S_POL @ Zt_pol[step-1,:] # np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
@@ -314,7 +314,6 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
     for step in range( 1, NSTEPS ):
         #if ( step == 2 or step % 100 == 0 ):
         #    print( "Step %d of %d" % (step, NSTEPS) )
-        
         
         Vt[step,:]             = Vt[step-1] + 0.5 * dtN * (F0 - L_COEFF * Vt[step-1] + RF0 ) / MASS
         Rt[step,:]             = Rt[step-1] +  + dtN * Vt[step]
@@ -423,7 +422,7 @@ if ( __name__ == "__main__" ):
     for traj in range( NTRAJ ):
         print( "Trajectory %d of %d" % (traj, NTRAJ) )
         R0             = np.random.choice(R_LIST, size=NMOL, p=P_BOLTZMANN/np.sum(P_BOLTZMANN)) # np.array([-2.5]*NMOL) #np.random.normal( -2.5, 0.25, size=NMOL )
-        V0             = np.zeros(NMOL)
+        V0             = np.zeros(NMOL) # TODO -- IMPLEMENT BOLTZMANN VELOCITY DISTRIBUTION
         Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
 
     # Plot a histogram of the positions
@@ -431,7 +430,7 @@ if ( __name__ == "__main__" ):
 
     # Save data
     np.save( f"{DATA_DIR}/R.npy", Rt )
-    np.save( f"{DATA_DIR}/V.npy", Vt )
+    # np.save( f"{DATA_DIR}/V.npy", Vt )
     np.save( f"{DATA_DIR}/Z_POL.npy", Zt_pol )
     np.save( f"{DATA_DIR}/Z_adF.npy", Zt_adF )
     np.save( f"{DATA_DIR}/E.npy", Et )
@@ -439,7 +438,7 @@ if ( __name__ == "__main__" ):
 
     # Average over trajectories
     Rt    = np.average( Rt   , axis=0 )
-    Vt    = np.average( Vt   , axis=0 )
+    # Vt    = np.average( Vt   , axis=0 )
     Et    = np.average( Et   , axis=0 )
     EPOLt = np.average( EPOLt, axis=0 )
 
@@ -457,14 +456,11 @@ if ( __name__ == "__main__" ):
     POP = np.abs(Zt_pol)**2
     POP = np.average(POP, axis=0)
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    if ( NPOL<10 ):
-        for state in range( NPOL ):
-            plt.plot( TIME, POP[:,state], "-", label="P%d" % state )
-    else:
-        for pol in range( 1,NPOL-1 ):
-            plt.plot( TIME, POP[:,pol], "-", c='black', lw=2 )
-        plt.plot( TIME, POP[:,0], lw=4, alpha=0.5, label="P0" )
-        plt.plot( TIME, POP[:,-1], lw=4, alpha=0.5, label="P%s" % (NPOL-1) )
+    plt.plot( TIME, POP[:,0], lw=4, alpha=0.5, label="P0" )
+    plt.plot( TIME, POP[:,1], lw=4, alpha=0.5, label="LP" )
+    if ( NMOL >= 2 ):
+        plt.plot( TIME, np.sum( POP[:,2:-1], axis=-1 ), lw=4, alpha=0.5, label="'Dark'" )
+    plt.plot( TIME, POP[:,-1], lw=4, alpha=0.5, label="UP" )
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
@@ -480,18 +476,9 @@ if ( __name__ == "__main__" ):
     POP = np.abs(Zt_adF)**2
     POP = np.average(POP, axis=0)
     plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    if ( NPOL<10 ):
-        plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
-        for pol in range( 1,NPOL-1 ):
-            plt.plot( TIME, POP[:,pol], "-", c="black", label="$|E_%d,0\\rangle$" % pol )
-        plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Dark" )
-        plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
-    else:
-        for pol in range( 1,NPOL-1 ):
-            plt.plot( TIME, POP[:,pol], "-", c='black', lw=2 )
-        plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
-        plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
-        plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Dark" )
+    plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
+    plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Exciton" )
+    plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
 
     plt.xlabel( "Time (a.u.)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
