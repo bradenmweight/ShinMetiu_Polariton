@@ -15,9 +15,9 @@ def get_Globals():
 
     global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
     NTRAJ  = 100
-    NTIME  = 1 # ps
-    dtN    = 0.5*41.341 # fs to a.u.
-    NSTEPS = int(NTIME * 1000 * 41.341 / dtN) + 1 # 2_000
+    NTIME  = 0.5 # ps
+    dtN    = 10 # 0.1 * 41.341 # fs to a.u.
+    NSTEPS = int(NTIME * 1000 * 41.341 / dtN) + 1
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
@@ -478,8 +478,8 @@ if ( __name__ == "__main__" ):
 
     # Plot Rt
     for mol in range( NMOL ):
-        plt.plot( TIME, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
+        plt.plot( TIME/41.341, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
+    plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Position (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/R.jpg", dpi=300 )
@@ -488,8 +488,8 @@ if ( __name__ == "__main__" ):
 
     # Plot Vt
     for mol in range( NMOL ):
-        plt.plot( TIME, Vt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
+        plt.plot( TIME/41.341, Vt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
+    plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Velocity (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/V.jpg", dpi=300 )
@@ -499,14 +499,14 @@ if ( __name__ == "__main__" ):
     # Plot Polaritonic Population
     POP = np.abs(Zt_pol)**2
     POP = np.average(POP, axis=0)
-    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    plt.plot( TIME, POP[:,0], lw=4, alpha=0.5, label="P0" )
-    plt.plot( TIME, POP[:,1], lw=4, alpha=0.5, label="LP" )
+    plt.plot( TIME/41.341, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
+    plt.plot( TIME/41.341, POP[:,0], lw=4, alpha=0.5, label="P0" )
+    plt.plot( TIME/41.341, POP[:,1], lw=4, alpha=0.5, label="LP" )
     if ( NMOL >= 2 ):
-        plt.plot( TIME, np.sum( POP[:,2:-1], axis=-1 ), lw=4, alpha=0.5, label="'Dark'" )
-    plt.plot( TIME, POP[:,-1], lw=4, alpha=0.5, label="UP" )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
-    plt.ylabel( "Population (a.u.)", fontsize=15 )
+        plt.plot( TIME/41.341, np.sum( POP[:,2:-1], axis=-1 ), lw=4, alpha=0.5, label="'Dark'" )
+    plt.plot( TIME/41.341, POP[:,-1], lw=4, alpha=0.5, label="UP" )
+    plt.xlabel( "Time (fs)", fontsize=15 )
+    plt.ylabel( "Population", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/POP_POL.jpg", dpi=300 )
     # Save another version with logarithmic y-axis
@@ -519,13 +519,13 @@ if ( __name__ == "__main__" ):
     # Plot adiabatic-Fock population
     POP = np.abs(Zt_adF)**2
     POP = np.average(POP, axis=0)
-    plt.plot( TIME, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
-    plt.plot( TIME, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
-    plt.plot( TIME, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Exciton" )
-    plt.plot( TIME, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
+    plt.plot( TIME/41.341, np.sum(POP[:,:],axis=-1), "-", alpha=0.5, c='black', lw=6 )
+    plt.plot( TIME/41.341, POP[:,0], "-", lw=4, alpha=0.5, label="G0" )
+    plt.plot( TIME/41.341, np.sum(POP[:,1:-1],axis=-1), "-", lw=4, alpha=0.5, label="Exciton" )
+    plt.plot( TIME/41.341, POP[:,-1], "-", lw=4, alpha=0.5, label="G1" )
 
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
-    plt.ylabel( "Population (a.u.)", fontsize=15 )
+    plt.xlabel( "Time (fs)", fontsize=15 )
+    plt.ylabel( "Population", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/POP_adF.jpg", dpi=300 )
     # Save another version with logarithmic y-axis
@@ -536,19 +536,19 @@ if ( __name__ == "__main__" ):
     plt.close()
 
     # Plot Et
-    plt.plot( TIME, Et[:,0], "-", label="EPOT" )
-    plt.plot( TIME, Et[:,1], "-", label="EKIN" )
-    plt.plot( TIME, Et[:,2], "--", label="ETOT" )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
-    plt.ylabel( "Population (a.u.)", fontsize=15 )
+    plt.plot( TIME/41.341, Et[:,0], "-", label="EPOT" )
+    plt.plot( TIME/41.341, Et[:,1], "-", label="EKIN" )
+    plt.plot( TIME/41.341, Et[:,2], "--", label="ETOT" )
+    plt.xlabel( "Time (fs)", fontsize=15 )
+    plt.ylabel( "Energy (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/EPOT_EKIN_ETOT.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
     # Plot total energy
-    plt.plot( TIME, Et[:,2], "--", label="ETOT" )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.plot( TIME/41.341, Et[:,2], "--", label="ETOT" )
+    plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Population (a.u.)", fontsize=15 )
     plt.legend()
     plt.savefig( f"{DATA_DIR}/ETOT.jpg", dpi=300 )
@@ -558,16 +558,16 @@ if ( __name__ == "__main__" ):
     # Plot the average photonic character
     PHOT_wfn = np.abs(Zt_adF[:,:,-1])**2
     PHOT_wfn = np.average(PHOT_wfn, axis=0)
-    plt.plot( TIME, PHOT_wfn, "-" )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.plot( TIME/41.341, PHOT_wfn, "-" )
+    plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Photonic Character, $\\langle \\hat{a}^\\dagger \\hat{a} \\rangle$", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/PHOTONIC.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
     # Plot the temperature
-    plt.plot( TIME, TEMP, "-" )
-    plt.xlabel( "Time (a.u.)", fontsize=15 )
+    plt.plot( TIME/41.341, TEMP, "-" )
+    plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Temperature (K)", fontsize=15 )
     plt.savefig( f"{DATA_DIR}/TEMPERATURE.jpg", dpi=300 )
     plt.clf()
