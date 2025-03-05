@@ -15,21 +15,21 @@ def get_Globals():
 
     global TIME, NSTEPS, dtN, MASS, NTRAJ, BATCH_SIZE
     NTRAJ  = 100
-    NTIME  = 0.5 # ps
+    NTIME  = 0.25 # ps
     dtN    = 10 # 0.1 * 41.341 # fs to a.u.
     NSTEPS = int(NTIME * 1000 * 41.341 / dtN) + 1
     TIME   = np.arange( 0, NSTEPS*dtN, dtN )
     MASS   = 1836.0
 
     global A0, WC
-    A0 = 0.05
+    A0 = float(argv[2]) # Collective Coupling Strength
     WC = 0.085 # 0.085 is resonance at FC point
 
     # Langevin Part (Fluctuation-Dissipation Verlet Propagation)
-    global L_COEFF, kT, a, b
+    global L_COEFF, T, kT, a, b
     L_COEFF         = 1.0 # Friction Coefficient (i.e., How fast to get to kT temperature ?)
-    #kT              = 300 * (0.025 / 300 / 27.2114) # Temperature in Hartree
-    kT              = 200 * (0.025 / 300 / 27.2114) # Temperature in Hartree
+    T               = 300 # Temperature in Kelvin
+    kT              = T * (0.025 / 300 / 27.2114) # Temperature in Hartree
 
     # Get memory size in GB of NMOL,NPOL,NPOL ndarray
     global MEMORY_SIZE
@@ -41,7 +41,7 @@ def get_Globals():
         #exit()
 
     global DATA_DIR
-    DATA_DIR = "PLOTS_DATA_NTRAJ_%d_NMOL_%d/" % (NTRAJ, NMOL)
+    DATA_DIR = "PLOTS_DATA_A0_%1.3f_WC_%1.3f_NTRAJ_%d_NMOL_%d/" % (A0, WC, NTRAJ, NMOL)
     try: os.mkdir(DATA_DIR)
     except FileExistsError: pass
 
@@ -247,8 +247,8 @@ def get_S_el( U1, U0 ):
     S = np.zeros( (NMOL, U0.shape[-1], U0.shape[-1]), dtype=np.complex128 )
     for A in range( NMOL ):
         S[A,:,:] = U1[A,:,:].T @ U0[A,:,:] # S = np.einsum("Axj,Axk->Ajk", U1, U0)
-        u,s,v = np.linalg.svd( S[A,:,:] )
-        S[A,:,:] = u @ v
+        u,s,vt   = np.linalg.svd( S[A,:,:] )
+        S[A,:,:] = u @ vt
     
     S_el      = np.zeros( (NPOL, NPOL), dtype=np.complex128 )
     S_el[0,0] = np.prod( S[:,0,0] )
@@ -257,6 +257,10 @@ def get_S_el( U1, U0 ):
         S_el[1+A,1+A] = S_el[0,0] * S[A,1,1] / S[A,0,0]
         S_el[0,1+A]   = S_el[0,0] * S[A,0,1] / S[A,0,0]
         S_el[1+A,0]   = S_el[0,0] * S[A,1,0] / S[A,0,0]
+
+    u,s,vt = np.linalg.svd( S_el )
+    S_el   = u @ vt # Do final orthogonalization. I didn't think this would be required. But it is. 
+                    # Maybe bug in above code ?
 
     return S_el
 
@@ -271,14 +275,11 @@ def correct_phase( Unew, Uold=None ):
 
 #@timer
 @njit()
-def do_electronic_propagation( step, E_TC_1, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_adF ):
-    S_POL          = U_TC_1.T @ U_TC_0 # np.einsum("xj,xk->jk", U_TC_1, U_TC_0)
-    S_el           = get_S_el( U1, U0 ) # <t1|t0>
-    S_el[:,:]      = U_TC_0.T @ S_el @ U_TC_0 # S_el = np.einsum("xj,xy,yk->jk", U_TC_0, S_el, U_TC_0) # <t1|t0>
+def do_electronic_propagation( step, E_TC_0, U_TC_1, U_TC_0, U1, U0, Zt_pol, Zt_adF ):
+    Zt_pol[step,:] = np.exp(-1j * E_TC_0 * dtN) * Zt_pol[step-1,:]
 
-    Zt_pol[step,:] = S_POL @ Zt_pol[step-1,:] # np.einsum("jk,k->j", S_POL, Zt_pol[step-1,:])
-    Zt_pol[step,:] = S_el  @ Zt_pol[step,:]   # np.einsum("jk,k->j", S_el, Zt_pol[step,:])
-    Zt_pol[step,:] = np.exp(-1j * E_TC_1 * dtN) * Zt_pol[step,:]
+    S_POL          = U_TC_1.T @ get_S_el( U1, U0 ) @ U_TC_0 # <t1|t0>
+    Zt_pol[step,:] = S_POL @ Zt_pol[step,:]
     Zt_adF[step,:] = U_TC_1 @ Zt_pol[step,:] # np.einsum("FP,P->F", U_TC_1, Zt_pol[step,:]) # POL to adFock
 
     return Zt_pol, Zt_adF
@@ -325,7 +326,7 @@ def do_Ehrenfest( R0, V0, MOL_DATA ):
         Rt[step,:]             = Rt[step-1] +  + dtN * Vt[step]
         H_TC_1, E_TC_1, U_TC_1 = get_H_TC( Rt[step,:], MOL_DATA )
         U_TC_1                 = correct_phase( U_TC_1, Uold=U_TC_0 )
-        Zt_pol, Zt_adF         = do_electronic_propagation( step, E_TC_1, U_TC_1.astype(np.complex128), U_TC_0.astype(np.complex128), MOL_DATA["U"](Rt[step,:]).astype(np.complex128), MOL_DATA["U"](Rt[step-1,:]).astype(np.complex128), Zt_pol, Zt_adF )
+        Zt_pol, Zt_adF         = do_electronic_propagation( step, E_TC_0, U_TC_1.astype(np.complex128), U_TC_0.astype(np.complex128), MOL_DATA["U"](Rt[step,:]).astype(np.complex128), MOL_DATA["U"](Rt[step-1,:]).astype(np.complex128), Zt_pol, Zt_adF )
         F1                     = get_TC_Force( Rt[step], Zt_pol[step], U_TC_1, MOL_DATA )
         RF1                    = np.sqrt(2 * kT * L_COEFF / dtN) * np.random.normal(0, 1, size=NMOL)
         Vt[step,:]             = Vt[step] + 0.5 * dtN * (F1 - L_COEFF * Vt[step] + RF1 ) / MASS
@@ -449,8 +450,10 @@ if ( __name__ == "__main__" ):
 
     for traj in range( NTRAJ ):
         print( "Trajectory %d of %d" % (traj, NTRAJ) )
-        R0             = np.random.choice(R_LIST, size=NMOL, p=R_BOLTZMANN)
+        R0             = [R_LIST[np.argmax(R_BOLTZMANN)]]*NMOL # np.random.choice(R_LIST, size=NMOL, p=R_BOLTZMANN)
+        #R0             = np.random.choice(R_LIST, size=NMOL, p=R_BOLTZMANN)
         V0             = np.random.choice(V_LIST, size=NMOL, p=V_BOLTZMANN)
+        print( "R0:\n", R0 )
         T  = 2 * (0.500 * MASS * np.sum(V0**2)) / NMOL / (0.025 / 300 / 27.2114)
         print("\tInitial Temperature: %1.2f K" % T )
         Rt[traj], Vt[traj], Zt_pol[traj], Zt_adF[traj], Et[traj], EPOLt[traj], PHOT[traj] = do_Ehrenfest( R0, V0, MOL_DATA )
@@ -470,15 +473,12 @@ if ( __name__ == "__main__" ):
     TEMP  = 2 * Et[:,:,1] / NMOL / (0.025 / 300 / 27.2114)  # in Kelvin
     TEMP  = np.average(TEMP, axis=0)
 
-    # Average over trajectories
-    Rt    = np.average( Rt   , axis=0 )
-    Vt    = np.average( Vt   , axis=0 )
-    Et    = np.average( Et   , axis=0 )
-    #EPOLt = np.average( EPOLt, axis=0 )
-
     # Plot Rt
-    for mol in range( NMOL ):
-        plt.plot( TIME/41.341, Rt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
+    # Color for each trajectory
+    colors = plt.cm.viridis(np.linspace(0,1,NTRAJ))
+    for traj in range( NTRAJ ):
+        for mol in range( NMOL ):
+            plt.plot( TIME/41.341, Rt[traj,:,mol], "-", c=colors[traj] )
     plt.xlabel( "Time (fs)", fontsize=15 )
     plt.ylabel( "Position (a.u.)", fontsize=15 )
     plt.legend()
@@ -486,15 +486,21 @@ if ( __name__ == "__main__" ):
     plt.clf()
     plt.close()
 
-    # Plot Vt
-    for mol in range( NMOL ):
-        plt.plot( TIME/41.341, Vt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
-    plt.xlabel( "Time (fs)", fontsize=15 )
-    plt.ylabel( "Velocity (a.u.)", fontsize=15 )
-    plt.legend()
-    plt.savefig( f"{DATA_DIR}/V.jpg", dpi=300 )
-    plt.clf()
-    plt.close()
+    # # Plot Vt
+    # for mol in range( NMOL ):
+    #     plt.plot( TIME/41.341, Vt[:,mol], "-"*(mol%2==0)+"--"*(mol%2!=0), label=(NMOL<10)*("Molecule %d" % mol) )
+    # plt.xlabel( "Time (fs)", fontsize=15 )
+    # plt.ylabel( "Velocity (a.u.)", fontsize=15 )
+    # plt.legend()
+    # plt.savefig( f"{DATA_DIR}/V.jpg", dpi=300 )
+    # plt.clf()
+    # plt.close()
+
+    # Average over trajectories
+    # Rt    = np.average( Rt   , axis=0 )
+    # Vt    = np.average( Vt   , axis=0 )
+    Et    = np.average( Et   , axis=0 )
+    #EPOLt = np.average( EPOLt, axis=0 )
 
     # Plot Polaritonic Population
     POP = np.abs(Zt_pol)**2
@@ -516,6 +522,17 @@ if ( __name__ == "__main__" ):
     plt.clf()
     plt.close()
 
+    # Plot polariton population normalization
+    POP = np.abs(Zt_pol)**2
+    POP = np.average(POP, axis=0)
+    plt.plot( TIME/41.341, np.sum(POP[:,:],axis=-1) - 1, "-", c='black', lw=4 )
+    plt.xlabel( "Time (fs)", fontsize=15 )
+    plt.ylabel( "Population", fontsize=15 )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/POP_adF_NORM.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
     # Plot adiabatic-Fock population
     POP = np.abs(Zt_adF)**2
     POP = np.average(POP, axis=0)
@@ -532,6 +549,17 @@ if ( __name__ == "__main__" ):
     plt.yscale('log')
     plt.ylim(1e-4,1)
     plt.savefig( f"{DATA_DIR}/POP_adF_log.jpg", dpi=300 )
+    plt.clf()
+    plt.close()
+
+    # Plot adiabatic-Fock population normalization
+    POP = np.abs(Zt_adF)**2
+    POP = np.average(POP, axis=0)
+    plt.plot( TIME/41.341, np.sum(POP[:,:],axis=-1) - 1, "-", c='black', lw=4 )
+    plt.xlabel( "Time (fs)", fontsize=15 )
+    plt.ylabel( "Population", fontsize=15 )
+    plt.legend()
+    plt.savefig( f"{DATA_DIR}/POP_POL_NORM.jpg", dpi=300 )
     plt.clf()
     plt.close()
 
